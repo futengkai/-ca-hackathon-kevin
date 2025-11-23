@@ -1,0 +1,430 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Desenho de Senha</title>
+<style>
+
+    body {
+
+        font-family: Arial, sans-serif;
+
+        margin: 0;
+
+        padding: 20px;
+
+        display: flex;
+
+        justify-content: center;
+
+        align-items: center;
+
+        height: 100vh;
+
+        background-color: #f5f5f;
+
+    }
+
+    #canvas {
+
+        border: 3px solid black;
+
+        border-radius: 25px;
+
+        cursor: crosshair;
+
+        right: 60px;
+
+    }
+
+    .flex-container {
+
+        display: flex;
+
+        flex-direction: row;
+
+        justify-content: space-between;
+
+    }
+
+    .button-container {
+
+        display: flex;
+
+        flex-direction: column;
+
+        gap: 10px;
+
+        position: fixed; 
+
+        top: 50px;      
+
+        left: 50px;     
+
+    }
+
+    button {
+
+        padding: 70px;
+
+        cursor: pointer;
+
+        width: 350px;
+
+        border-radius: 25px;
+
+    }
+
+    .pen-container {
+
+        position: fixed;
+
+        right: 20px;
+
+        top: 50px;
+
+        width: 300px;
+
+        padding: 60px;
+
+        background: white;
+
+        border: 2px solid #ccc;
+
+        border-radius: 15px;
+
+    }
+</style>
+</head>
+<body>
+<div>
+<canvas id="canvas" width="600" height="650"></canvas>
+<div class="button-container">
+<button id="saveButton">Salvar Desenho</button>
+<button id="clearButton">Limpar</button>
+<button id="colorButton">Mudar Cor</button>
+<button id="verifyButton">Verificar Desenho</button>
+</div>
+<div class="pen-container">
+<label for="penSize"><b>Tamanho da Caneta</b></label>
+<br><br>
+<input type="range" id="penSize" min="1" max="30" value="3">
+<div>Atual: <span id="penValue">3</span> px</div>
+</div>
+<script>
+
+document.addEventListener('DOMContentLoaded', () => {
+
+    const canvas = document.getElementById('canvas');
+
+    const ctx = canvas.getContext('2d');
+
+    let drawing = false;
+
+    let currentStroke = [];
+
+    let allStrokes = [];
+
+    let color = 'black';
+
+    const RESAMPLE_POINTS = 50;
+
+    const TOLERANCE = 0.6;
+
+    const ALLOW_PERCENT_ERROR = 0.6;
+
+
+    let penSize = 3;
+
+    const penSlider = document.getElementById("penSize");
+
+    const penValue = document.getElementById("penValue");
+
+    penSlider.addEventListener("input", () => {
+
+        penSize = Number(penSlider.value);
+
+        penValue.textContent = penSize;
+
+    });
+
+
+    canvas.addEventListener('mousedown', e => {
+
+        drawing = true;
+
+        currentStroke = [];
+
+        addPoint(e);
+
+    });
+
+    canvas.addEventListener('mousemove', e => {
+
+        if (!drawing) return;
+
+        addPoint(e);
+
+        drawLine();
+
+    });
+
+    canvas.addEventListener('mouseup', () => {
+
+        if (currentStroke.length) allStrokes.push([...currentStroke]);
+
+        drawing = false;
+
+        currentStroke = [];
+
+    });
+
+    canvas.addEventListener('mouseleave', () => {
+
+        if (drawing && currentStroke.length) allStrokes.push([...currentStroke]);
+
+        drawing = false;
+
+        currentStroke = [];
+
+    });
+
+    function addPoint(e) {
+
+        const rect = canvas.getBoundingClientRect();
+
+        const x = e.clientX - rect.left;
+
+        const y = e.clientY - rect.top;
+
+        currentStroke.push([x, y]);
+
+    }
+
+    function drawLine() {
+
+        if (currentStroke.length < 2) return;
+
+        const p1 = currentStroke[currentStroke.length - 2];
+
+        const p2 = currentStroke[currentStroke.length - 1];
+
+        ctx.beginPath();
+
+        ctx.moveTo(p1[0], p1[1]);
+
+        ctx.lineTo(p2[0], p2[1]);
+
+        ctx.strokeStyle = color;
+
+        ctx.lineWidth = penSize;
+
+        ctx.lineCap = 'round';
+
+        ctx.stroke();
+
+    }
+
+
+    document.getElementById('clearButton').addEventListener('click', () => {
+
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+        currentStroke = [];
+
+        allStrokes = [];
+
+    });
+
+    document.getElementById('colorButton').addEventListener('click', () => {
+
+        color = (color === 'black') ? 'red' : 'black';
+
+    });
+
+    document.getElementById('saveButton').addEventListener('click', () => {
+
+        if (!allStrokes.length) {
+
+            alert("Desenhe algo primeiro!");
+
+            return;
+
+        }
+
+        const normalized = normalizeStrokes(allStrokes);
+
+        const resampled = normalized.map(resampleStroke);
+
+        localStorage.setItem('savedStrokes', JSON.stringify(resampled));
+
+        alert("Senha salvada");
+
+    });
+
+    document.getElementById('verifyButton').addEventListener('click', () => {
+
+        if (!allStrokes.length) {
+
+            alert("Desenhe algo para verificar!");
+
+            return;
+
+        }
+
+        const saved = localStorage.getItem('savedStrokes');
+
+        if (!saved) {
+
+            alert("Nenhuma senha salva!");
+
+            return;
+
+        }
+
+        const normalizedCurrent = normalizeStrokes(allStrokes).map(resampleStroke);
+
+        const savedStrokes = JSON.parse(saved);
+
+        const matched = compareStrokes(savedStrokes, normalizedCurrent);
+
+        alert(matched ? "Desenho correto" : "Desenho incorreto");
+
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+        allStrokes = [];
+
+        currentStroke = [];
+
+    });
+
+
+    function normalizeStrokes(strokes) {
+
+        let xs = [], ys = [];
+
+        strokes.forEach(s => s.forEach(p => {
+
+            xs.push(p[0]);
+
+            ys.push(p[1]);
+
+        }));
+
+        const minX = Math.min(...xs), maxX = Math.max(...xs);
+
+        const minY = Math.min(...ys), maxY = Math.max(...ys);
+
+        const w = maxX - minX || 1;
+
+        const h = maxY - minY || 1;
+
+        return strokes.map(s =>
+
+            s.map(p => [
+
+                (p[0] - minX) / w,
+
+                (p[1] - minY) / h
+
+            ])
+
+        );
+
+    }
+
+    function resampleStroke(stroke) {
+
+        if (stroke.length === RESAMPLE_POINTS) return stroke;
+
+        const totalLen = stroke.reduce(
+
+            (acc, p, i, a) => i > 0 ? acc + dist(p, a[i - 1]) : acc, 0
+
+        );
+
+        const D = totalLen / (RESAMPLE_POINTS - 1);
+
+        let resampled = [stroke[0]];
+
+        let d = 0;
+
+        for (let i = 1; i < stroke.length; i++) {
+
+            let pt1 = stroke[i - 1], pt2 = stroke[i];
+
+            let segLen = dist(pt1, pt2);
+
+            while (d + segLen >= D) {
+
+                const t = (D - d) / segLen;
+
+                const nx = pt1[0] + t * (pt2[0] - pt1[0]);
+
+                const ny = pt1[1] + t * (pt2[1] - pt1[1]);
+
+                resampled.push([nx, ny]);
+
+                pt1 = [nx, ny];
+
+                segLen = dist(pt1, pt2);
+
+                d = 0;
+
+            }
+
+            d += segLen;
+
+        }
+
+        while (resampled.length < RESAMPLE_POINTS)
+
+            resampled.push(stroke[stroke.length - 1]);
+
+        return resampled;
+
+    }
+
+    function dist(a, b) {
+
+        return Math.hypot(a[0] - b[0], a[1] - b[1]);
+
+    }
+
+    function compareStrokes(saved, current) {
+
+        if (saved.length !== current.length) return false;
+
+        for (let i = 0; i < saved.length; i++) {
+
+            const s = saved[i];
+
+            const c = current[i];
+
+            let bad = 0;
+
+            const maxBad = Math.floor(s.length * ALLOW_PERCENT_ERROR);
+
+            for (let j = 0; j < s.length; j++) {
+
+                if (dist(s[j], c[j]) > TOLERANCE) {
+
+                    bad++;
+
+                    if (bad > maxBad) return false;
+
+                }
+
+            }
+
+        }
+
+        return true;
+
+    }
+
+});
+</script>
+</body>
+</html>
